@@ -9,13 +9,14 @@ import logging
 import random
 import signal
 import sys
+import csv
 
 if 'threading' in sys.modules:
     del sys.modules['threading']
 import time
 import requests
-from unfollow_protocol import unfollow_protocol
-from userinfo import UserInfo
+from src.unfollow_protocol import unfollow_protocol
+from src.userinfo import UserInfo
 
 
 class InstaBot:
@@ -105,6 +106,9 @@ class InstaBot:
     # For new_auto_mod
     next_iteration = {"Like": 0, "Follow": 0, "Unfollow": 0, "Comments": 0}
 
+    # tag for logging purposes
+    current_tag = ''
+
     def __init__(self,
                  login,
                  password,
@@ -135,7 +139,8 @@ class InstaBot:
                  user_blacklist={},
                  tag_blacklist=[],
                  unwanted_username_list=[],
-                 unfollow_whitelist=[]):
+                 unfollow_whitelist=[],
+                 log_file = 'log_' + time.strftime('%Y%m%d') + '.csv'):
 
         self.bot_start = datetime.datetime.now()
         self.unfollow_break_min = unfollow_break_min
@@ -200,6 +205,16 @@ class InstaBot:
         log_string = 'Instabot v1.1.0 started at %s:\n' % \
                      (now_time.strftime("%d.%m.%Y %H:%M"))
         self.write_log(log_string)
+
+        with open(log_file, "w", newline='') as output_file:
+            writer = csv.DictWriter(output_file, delimiter=';',
+                                    fieldnames=["like_timestamp", "tag", "user_id", "media_id",
+                                                "created_at",
+                                                "permalink", "caption", "comments", "likes", "is_video"])
+            writer.writeheader()
+            output_file.close()
+        self.output_file = open(log_file, "a", newline = '')
+        self.writer = csv.writer(self.output_file, delimiter=';')
         self.login()
         self.populate_user_blacklist()
         signal.signal(signal.SIGTERM, self.cleanup)
@@ -315,6 +330,7 @@ class InstaBot:
         # Logout
         if (self.login_status):
             self.logout()
+        self.output_file.close()
         exit(0)
 
     def get_media_id_by_tag(self, tag):
@@ -322,6 +338,7 @@ class InstaBot:
 
         if (self.login_status):
             log_string = "Get media id by tag: %s" % (tag)
+            self.current_tag = tag
             self.write_log(log_string)
             if self.login_status == 1:
                 url_tag = self.url_tag % (tag)
@@ -592,6 +609,21 @@ class InstaBot:
                 # If like go to sleep:
                 self.next_iteration["Like"] = time.time() + \
                                               self.add_time(self.like_delay)
+                # Write info about liked media into .csv
+                cur_media = self.media_by_tag[0]
+                self.writer.writerow((
+                    str(datetime.datetime.now()),
+                    self.current_tag,
+                    str(cur_media['id']) + "_" + str(cur_media['owner']['id']),
+                    cur_media['owner']['id'],
+                    cur_media['date'],
+                    'instagram.com/p/' + cur_media['code'],
+                    cur_media['caption'].replace('\n','').replace('\t',''),
+                    cur_media['comments']['count'],
+                    cur_media['likes']['count'],
+                    cur_media['is_video']))
+                self.output_file.flush()
+
                 # Count this tag likes:
                 self.this_tag_like_count += 1
                 if self.this_tag_like_count >= self.max_tag_like_count:
